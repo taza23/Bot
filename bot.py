@@ -1,123 +1,51 @@
-import telebot
-from telebot import types
+import streamlit as st
 import subprocess
-import threading
-import time
 import os
 
-# إعدادات البوت
-TOKEN = '8532448939:AAHt3VRMnROqmemsvFbWsTjpapRotelbOng'
-bot = telebot.TeleBot(TOKEN)
+st.set_page_config(page_title="Chafiq Stream Panel", layout="wide")
+st.title("📺 Chafiq Multi-Stream Control Panel")
 
-# تخزين بيانات المستخدمين
-user_sessions = {}
+# مخزن العمليات (Processes) باش نقدروا نحبسوهم
+if 'processes' not in st.session_state:
+    st.session_state.processes = {}
 
-# دالة بناء الأوامر والقائمة
-def main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("🚀 بدء بث مباشر", "🛑 إيقاف البث")
-    markup.add("📝 نص الشريط المتحرك", "⚙️ حالة البث")
-    return markup
-
-@bot.message_handler(commands=['start'])
-def start(message):
-    cid = message.chat.id
-    user_sessions[cid] = {
-        'rtmps': None, 
-        'm3u8': None, 
-        'ticker': "قناة البث المباشر - تابعونا", 
-        'active': False
-    }
-    bot.send_message(cid, "🌟 مرحبا بك في نظام البث الاحترافي v3\nتم تفعيل نظام التشغيل المستمر (24/7).", reply_markup=main_menu())
-
-@bot.message_handler(func=lambda m: m.text == "📝 نص الشريط المتحرك")
-def set_ticker(message):
-    msg = bot.send_message(message.chat.id, "أرسل النص اللي بغيتي يدوز لتحت (مثلاً: مرحبا بكم في قناتنا...):")
-    bot.register_next_step_handler(msg, save_ticker)
-
-def save_ticker(message):
-    user_sessions[message.chat.id]['ticker'] = message.text
-    bot.send_message(message.chat.id, f"✅ تم تحديث شريط الأخبار: {message.text}")
-
-@bot.message_handler(func=lambda m: m.text == "🚀 بدء بث مباشر")
-def get_rtmps(message):
-    msg = bot.send_message(message.chat.id, "🔗 أرسل رابط RTMPS الكامل:")
-    bot.register_next_step_handler(msg, get_m3u8)
-
-def get_m3u8(message):
-    user_sessions[message.chat.id]['rtmps'] = message.text
-    msg = bot.send_message(message.chat.id, "📺 أرسل رابط M3U8 (المصدر):")
-    bot.register_next_step_handler(msg, start_engine)
-
-def start_engine(message):
-    cid = message.chat.id
-    user_sessions[cid]['m3u8'] = message.text
-    user_sessions[cid]['active'] = True
+# واجهة إضافة بث جديد
+with st.sidebar:
+    st.header("➕ Add New Stream")
+    stream_name = st.text_input("Stream Name (e.g. Channel 1)")
+    m3u8_url = st.text_input("M3U8 Link")
+    stream_key = st.text_input("Stream Key", type="password")
     
-    bot.send_message(cid, "🚀 تم تفعيل البث بنجاح! النظام سيقوم بإعادة التشغيل تلقائياً في حال الانقطاع.")
-    
-    # تشغيل البث في Thread منفصل مع خاصية الـ Auto-Restart
-    threading.Thread(target=stream_monitor, args=(cid,), daemon=True).start()
+    if st.button("Save & Add"):
+        if stream_name and m3u8_url and stream_key:
+            if 'streams' not in st.session_state:
+                st.session_state.streams = []
+            st.session_state.streams.append({
+                "name": stream_name,
+                "url": m3u8_url,
+                "key": stream_key
+            })
+            st.success(f"Added {stream_name}")
 
-def stream_monitor(cid):
-    """دالة مراقبة البث وإعادة تشغيله تلقائياً"""
-    while user_sessions.get(cid) and user_sessions[cid]['active']:
-        config = user_sessions[cid]
-        m3u8 = config['m3u8']
-        rtmps = config['rtmps']
-        ticker = config['ticker']
+# عرض البثوث المضافة والتحكم فيها بالأزرار
+if 'streams' in st.session_state:
+    cols = st.columns(3) # عرض 3 بثوث فكل سطر
+    for i, stream in enumerate(st.session_state.streams):
+        with cols[i % 3]:
+            st.info(f"**{stream['name']}**")
+            
+            # زرار التشغيل
+            if st.button(f"▶️ Start {stream['name']}", key=f"start_{i}"):
+                # كود FFmpeg مع اللوغو (Watermark)
+                cmd = f'ffmpeg -re -i "{stream["url"]}" -i "logo.png" -filter_complex "overlay=W-w-10:10" -c:v libx264 -preset superfast -b:v 2500k -c:a aac -f flv "rtmp://a.rtmp.youtube.com/live2/{stream["key"]}"'
+                
+                # تشغيل في الخلفية
+                process = subprocess.Popen(cmd, shell=True)
+                st.session_state.processes[stream['name']] = process
+                st.success(f"Stream {stream['name']} is LIVE!")
 
-        # فلتر العلامة المائية المتحركة (Scrolling Text)
-        # x=w-mod(t*100\,w+tw) تجعل النص يتحرك من اليمين لليسر
-        filter_complex = (
-            f"drawtext=text='{ticker}':x=w-mod(t*100\,w+tw):y=h-50:"
-            f"fontsize=30:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=5"
-        )
-
-        command = [
-            'ffmpeg',
-            '-re',
-            '-i', m3u8,
-            '-vf', filter_complex,
-            '-c:v', 'libx264',
-            '-preset', 'veryfast',
-            '-b:v', '3000k', # جودة الفيديو
-            '-maxrate', '3000k',
-            '-bufsize', '6000k',
-            '-c:a', 'aac',
-            '-b:a', '128k',
-            '-f', 'flv',
-            rtmps
-        ]
-
-        try:
-            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            user_sessions[cid]['process'] = process
-            process.wait() # انتظر حتى يسقط البث
-        except Exception as e:
-            print(f"Error: {e}")
-        
-        # إذا كان البث لا يزال مطلوباً، انتظر 5 ثواني وأعد التشغيل
-        if user_sessions[cid]['active']:
-            time.sleep(5)
-            # يمكن إرسال تنبيه للمستخدم هنا (اختياري)
-
-@bot.message_handler(func=lambda m: m.text == "🛑 إيقاف البث")
-def stop_all(message):
-    cid = message.chat.id
-    if cid in user_sessions:
-        user_sessions[cid]['active'] = False
-        if 'process' in user_sessions[cid]:
-            user_sessions[cid]['process'].terminate()
-        bot.send_message(cid, "🛑 تم إيقاف البث ونظام المراقبة.")
-
-@bot.message_handler(func=lambda m: m.text == "⚙️ حالة البث")
-def status(message):
-    cid = message.chat.id
-    status_msg = "🟢 البث شغال حالياً" if user_sessions.get(cid, {}).get('active') else "🔴 البث متوقف"
-    bot.send_message(cid, f"وضع النظام: {status_msg}")
-
-# تشغيل البوت
-bot.remove_webhook()
-print("--- البوت الهربان شغال دابا ---")
-bot.infinity_polling()
+            # زرار الإيقاف
+            if st.button(f"🛑 Stop {stream['name']}", key=f"stop_{i}"):
+                if stream['name'] in st.session_state.processes:
+                    st.session_state.processes[stream['name']].terminate()
+                    st.warning(f"Stream {stream['name']} Stopped.")
