@@ -1,0 +1,20 @@
+name: Arbworld Auto Bot
+on:
+  schedule:
+    - cron: '*/5 * * * *' # غيخدم راسو كل 5 دقائق
+  workflow_dispatch: # باش تقدر تخدمو نتا وقتما بغيتي
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install Libs
+        run: pip install cloudscraper beautifulsoup4 requests
+      - name: Run Monitor
+        run: python monitor.py
+        
