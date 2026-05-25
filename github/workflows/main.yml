@@ -1,20 +1,93 @@
-name: Arbworld Auto Bot
+name: 🚀 FB Multi Stream PRO MAX
+
 on:
-  schedule:
-    - cron: '*/5 * * * *' # غيخدم راسو كل 5 دقائق
-  workflow_dispatch: # باش تقدر تخدمو نتا وقتما بغيتي
+  workflow_dispatch:
+    inputs:
+      SOURCE_LINKS:
+        description: 'روابط البث - فرق بينهم بـ ,'
+        required: true
+
+      FBSTREAMKEYS:
+        description: 'مفاتيح البث - فرق بينهم بـ ,'
+        required: true
+
+      WATERMARK_TEXT:
+        description: 'نص العلامة المائية'
+        required: true
+        default: 'CHAFIK GHADDAR TV'
 
 jobs:
-  run-bot:
+  multi-broadcast:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      - name: Install Libs
-        run: pip install cloudscraper beautifulsoup4 requests
-      - name: Run Monitor
-        run: python monitor.py
-        
+      - name: ⚡ Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: 🚀 Start Multi Streaming
+        shell: bash
+        run: |
+          echo "=============================="
+          echo "🚀 STARTING MULTI STREAM..."
+          echo "=============================="
+
+          IFS=',' read -ra SOURCES <<< "${{ github.event.inputs.SOURCE_LINKS }}"
+          IFS=',' read -ra KEYS <<< "${{ github.event.inputs.FBSTREAMKEYS }}"
+
+          COUNT_SOURCES=${#SOURCES[@]}
+          COUNT_KEYS=${#KEYS[@]}
+
+          if [ "$COUNTSOURCES" -ne "$COUNTKEYS" ]; then
+            echo "❌ عدد الروابط وعدد المفاتيح غير متساوي"
+            exit 1
+          fi
+
+          for (( i=0; i<$COUNT_SOURCES; i++ ))
+          do
+            SOURCE=$(echo "${SOURCES[$i]}" | xargs)
+            KEY=$(echo "${KEYS[$i]}" | xargs)
+
+            echo "▶️ Launch Stream $((i+1))"
+
+            ffmpeg \
+            -hide_banner \
+            -loglevel error \
+            -reconnect 1 \
+            -reconnect_streamed 1 \
+            -reconnectdelaymax 10 \
+            -threadqueuesize 4096 \
+            -i "$SOURCE" \
+            -vf "drawtext=text='${{ github.event.inputs.WATERMARK_TEXT }}':fontcolor=white:fontsize=36:borderw=2:bordercolor=black:box=1:boxcolor=black@0.4:x=w-mod(t*100\,w+tw):y=h-th-25" \
+            -map 0:v:0 \
+            -map 0:a? \
+            -c:v libx264 \
+            -preset veryfast \
+            -tune zerolatency \
+            -pix_fmt yuv420p \
+            -profile:v main \
+            -r 30 \
+            -g 60 \
+            -keyint_min 60 \
+            -sc_threshold 0 \
+            -b:v 3000k \
+            -maxrate 3000k \
+            -bufsize 6000k \
+            -c:a aac \
+            -b:a 128k \
+            -ar 44100 \
+            -f flv \
+            "rtmps://live-api-s.facebook.com:443/rtmp/$KEY" > stream_$i.log 2>&1 &
+
+            echo "✅ Stream $((i+1)) Started"
+          done
+
+          echo "=============================="
+          echo "🔥 ALL STREAMS RUNNING"
+          echo "=============================="
+
+          while true
+          do
+            sleep 60
+          done
